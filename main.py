@@ -4,66 +4,99 @@ from passlib.context import CryptContext
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
 
-# =========================
-# CONFIG
-# =========================
-
-SECRET_KEY = "supersecretkey"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+# =====================================
+# APP CONFIG
+# =====================================
 
 app = FastAPI()
 
-# =========================
-# PASSWORD HASHING
-# =========================
+SECRET_KEY = "super-secret-key"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60
+
+# =====================================
+# PASSWORD CONFIG
+# =====================================
 
 pwd_context = CryptContext(
     schemes=["bcrypt"],
     deprecated="auto"
 )
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+oauth2_scheme = OAuth2PasswordBearer(
+    tokenUrl="login"
+)
 
-# =========================
-# FAKE DATABASE
-# =========================
+# =====================================
+# USERS DATABASE
+# =====================================
+
+# login:
+# username = admin
+# password = admin123
 
 fake_users_db = {
     "admin": {
         "username": "admin",
-        "hashed_password": "$2b$12$yXQJ8xYF8K7YqQ0Zk5QX2e8Bf7P4n6j2K0j2dV3KxQfWn5rLx8v2S"
+        "hashed_password": pwd_context.hash("admin123")
     }
 }
 
-# password = admin123
+# =====================================
+# PASSWORD FUNCTIONS
+# =====================================
 
-# =========================
-# FUNCTIONS
-# =========================
+def verify_password(
+    plain_password: str,
+    hashed_password: str
+):
+    return pwd_context.verify(
+        plain_password,
+        hashed_password
+    )
 
-def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
+def get_password_hash(password: str):
+    return pwd_context.hash(password)
 
-def authenticate_user(username: str, password: str):
+# =====================================
+# AUTH FUNCTIONS
+# =====================================
+
+def authenticate_user(
+    username: str,
+    password: str
+):
+
     user = fake_users_db.get(username)
 
     if not user:
         return False
 
-    if not verify_password(password, user["hashed_password"]):
+    if not verify_password(
+        password,
+        user["hashed_password"]
+    ):
         return False
 
     return user
 
-def create_access_token(data: dict, expires_delta: timedelta = None):
+def create_access_token(
+    data: dict,
+    expires_delta: timedelta = None
+):
+
     to_encode = data.copy()
 
     expire = datetime.utcnow() + (
-        expires_delta or timedelta(minutes=15)
+        expires_delta
+        or timedelta(
+            minutes=ACCESS_TOKEN_EXPIRE_MINUTES
+        )
     )
 
-    to_encode.update({"exp": expire})
+    to_encode.update({
+        "exp": expire
+    })
 
     encoded_jwt = jwt.encode(
         to_encode,
@@ -73,13 +106,17 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
 
     return encoded_jwt
 
-async def get_current_user(token: str = Depends(oauth2_scheme)):
+async def get_current_user(
+    token: str = Depends(oauth2_scheme)
+):
+
     credentials_exception = HTTPException(
         status_code=401,
         detail="Could not validate credentials"
     )
 
     try:
+
         payload = jwt.decode(
             token,
             SECRET_KEY,
@@ -101,18 +138,21 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
 
     return user
 
-# =========================
+# =====================================
 # ROUTES
-# =========================
+# =====================================
 
 @app.get("/")
 def home():
     return {
+        "status": "ok",
         "message": "API działa poprawnie 🚀"
     }
 
 @app.post("/login")
-async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+async def login(
+    form_data: OAuth2PasswordRequestForm = Depends()
+):
 
     user = authenticate_user(
         form_data.username,
@@ -126,10 +166,9 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
         )
 
     access_token = create_access_token(
-        data={"sub": user["username"]},
-        expires_delta=timedelta(
-            minutes=ACCESS_TOKEN_EXPIRE_MINUTES
-        )
+        data={
+            "sub": user["username"]
+        }
     )
 
     return {
@@ -139,8 +178,17 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
 
 @app.get("/protected")
 async def protected_route(
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(
+        get_current_user
+    )
 ):
+
     return {
         "message": f"Witaj {current_user['username']}"
+    }
+
+@app.get("/health")
+def health():
+    return {
+        "status": "healthy"
     }
