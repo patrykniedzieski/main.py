@@ -3,192 +3,63 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
+from sqlalchemy.orm import Session
+import os
 
-# =====================================
-# APP CONFIG
-# =====================================
+# Importy z Twoich plików pomocniczych
+from database import get_db, Base, engine
+from models import UserConfig
+from security import encrypt_key, decrypt_key
+from pydantic import BaseModel
+
+# Inicjalizacja bazy danych
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
-SECRET_KEY = "super-secret-key"
+# KONFIGURACJA (W produkcyjnym Railway używaj zmiennych środowiskowych!)
+SECRET_KEY = os.getenv("SECRET_KEY", "super-secret-key")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60
+
+# ... [Tu wstaw swoje funkcje: verify_password, get_password_hash, authenticate_user, create_access_token, get_current_user] ...
+
+# Schemat dla danych Empik
+class EmpikRequest(BaseModel):
+    api_key: str
+    api_url: str
 
 # =====================================
-# PASSWORD CONFIG
+# ROUTES (Zintegrowane)
 # =====================================
 
-pwd_context = CryptContext(
-    schemes=["bcrypt"],
-    deprecated="auto"
-)
-
-oauth2_scheme = OAuth2PasswordBearer(
-    tokenUrl="login"
-)
-
-# =====================================
-# USERS DATABASE
-# =====================================
-
-# login:
-# username = admin
-# password = admin123
-
-fake_users_db = {
-    "admin": {
-        "username": "admin",
-        "hashed_password": pwd_context.hash("admin123")
-    }
-}
-
-# =====================================
-# PASSWORD FUNCTIONS
-# =====================================
-
-def verify_password(
-    plain_password: str,
-    hashed_password: str
+@app.post("/add-empik-config")
+async def add_empik_config(
+    data: EmpikRequest, 
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
-    return pwd_context.verify(
-        plain_password,
-        hashed_password
+    """Zapisuje zaszyfrowany klucz dla zalogowanego użytkownika"""
+    encrypted_key = encrypt_key(data.api_key)
+    
+    # Tworzymy rekord w bazie
+    new_config = UserConfig(
+        user_id=1, # Tutaj w przyszłości pobierz ID z current_user
+        encrypted_api_key=encrypted_key, 
+        api_url=data.api_url
     )
+    db.add(new_config)
+    db.commit()
+    return {"message": "Konfiguracja Empik zapisana bezpiecznie"}
 
-def get_password_hash(password: str):
-    return pwd_context.hash(password)
-
-# =====================================
-# AUTH FUNCTIONS
-# =====================================
-
-def authenticate_user(
-    username: str,
-    password: str
+@app.get("/get-empik-config")
+async def get_config(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
-
-    user = fake_users_db.get(username)
-
-    if not user:
-        return False
-
-    if not verify_password(
-        password,
-        user["hashed_password"]
-    ):
-        return False
-
-    return user
-
-def create_access_token(
-    data: dict,
-    expires_delta: timedelta = None
-):
-
-    to_encode = data.copy()
-
-    expire = datetime.utcnow() + (
-        expires_delta
-        or timedelta(
-            minutes=ACCESS_TOKEN_EXPIRE_MINUTES
-        )
-    )
-
-    to_encode.update({
-        "exp": expire
-    })
-
-    encoded_jwt = jwt.encode(
-        to_encode,
-        SECRET_KEY,
-        algorithm=ALGORITHM
-    )
-
-    return encoded_jwt
-
-async def get_current_user(
-    token: str = Depends(oauth2_scheme)
-):
-
-    credentials_exception = HTTPException(
-        status_code=401,
-        detail="Could not validate credentials"
-    )
-
-    try:
-
-        payload = jwt.decode(
-            token,
-            SECRET_KEY,
-            algorithms=[ALGORITHM]
-        )
-
-        username: str = payload.get("sub")
-
-        if username is None:
-            raise credentials_exception
-
-    except JWTError:
-        raise credentials_exception
-
-    user = fake_users_db.get(username)
-
-    if user is None:
-        raise credentials_exception
-
-    return user
-
-# =====================================
-# ROUTES
-# =====================================
-
-@app.get("/")
-def home():
-    return {
-        "status": "ok",
-        "message": "API działa poprawnie 🚀"
-    }
-
-@app.post("/login")
-async def login(
-    form_data: OAuth2PasswordRequestForm = Depends()
-):
-
-    user = authenticate_user(
-        form_data.username,
-        form_data.password
-    )
-
-    if not user:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid username or password"
-        )
-
-    access_token = create_access_token(
-        data={
-            "sub": user["username"]
-        }
-    )
-
-    return {
-        "access_token": access_token,
-        "token_type": "bearer"
-    }
-
-@app.get("/protected")
-async def protected_route(
-    current_user: dict = Depends(
-        get_current_user
-    )
-):
-
-    return {
-        "message": f"Witaj {current_user['username']}"
-    }
-
-@app.get("/health")
-def health():
-    return {
-        "status": "healthy"
-    }
+    """Pobiera i odszyfrowuje klucz dla zalogowanego użytkownika"""
+    config = db.query(UserConfig).filter(UserConfig.user_id == 1).first()
+    if not config:
+        raise HTTPException(status_code=404, detail="Brak konfiguracji")
+    
+    raw_key = decrypt_key(config.encrypted_api_key)
+    return {"api_url": config.api_url, "api_key": "******** (odszyfrowany tylko do użycia w backendzie)"}
