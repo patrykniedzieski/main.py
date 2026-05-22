@@ -1,13 +1,14 @@
 import os
+from dotenv import load_dotenv
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
 
-DATABASE_URL = os.getenv("DATABASE_URL") # Railway doda to automatycznie
+# TO MUSI BYĆ NA GÓRZE, PRZED UŻYCIEM DATABASE_URL
+load_dotenv() 
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+# Dodaj zabezpieczenie:
+if DATABASE_URL is None:
+    raise ValueError("Brak zmiennej DATABASE_URL w środowisku!")
+
 engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(bind=engine)
-Base = declarative_base()
-
-def get_db():
-    db = SessionLocal()
-    try: yield db
-    finally: db.close()
